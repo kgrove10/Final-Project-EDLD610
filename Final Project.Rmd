@@ -1,0 +1,484 @@
+---
+title: "Final Project"
+author: "Kivalina Grove"
+date: "2/10/2019"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rio)
+library(dplyr)
+library(tidyverse)
+library(janitor)
+library(lubridate)
+```
+
+## Final Project (rough draft stage)
+
+Import Data
+```{r importdata}
+d1 <- import("./data/201801_hubway_tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "january")
+d2 <- import("./data/201802_hubway_tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "february")
+d3 <- import("./data/201803_hubway_tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "march")
+d4 <- import("./data/201804-hubway-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "april")
+d5 <- import("./data/201805-bluebikes-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "may")
+d6 <- import("./data/201806-bluebikes-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "june")
+d7 <- import("./data/201807-bluebikes-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "july")
+d8 <- import("./data/201808-bluebikes-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "august")
+d9 <- import("./data/201809-bluebikes-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "september")
+d10 <- import("./data/201810-bluebikes-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "october")
+d11 <- import("./data/201811-bluebikes-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "november")
+d12 <- import("./data/201812-bluebikes-tripdata.csv", setclass = "tbl_df") %>%
+  clean_names() %>%
+  mutate(month = "december")
+
+stations <- import("./data/Hubway_Stations_as_of_July_2017.csv", setclass = "tbl_df") %>%
+  clean_names()
+
+d1 <- d1 %>%
+  mutate(birth_year = as.integer(birth_year))
+
+d2 <- d2 %>%
+  mutate(birth_year = as.integer(birth_year))
+
+d3 <- d3 %>%
+  mutate(birth_year = as.integer(birth_year))
+
+d4 <- d4 %>%
+  mutate(birth_year = as.integer(birth_year))
+
+trips <- bind_rows(d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12)
+
+trips_tidy <- trips %>%
+  separate(starttime, c("startdate", "starttime"), sep = " ") %>%
+  separate(stoptime, c("stopdate", "stoptime"), sep = " ") %>%
+  mutate(startdate = ymd(startdate), stopdate = ymd(stopdate)) %>%
+  #mutate(starttime = hms(starttime), stoptime = hms(stoptime)) %>%
+  mutate(weekday = weekdays(startdate)) %>%
+  separate(starttime, c("hour", "minute", "second"))
+
+#filter by:
+ridesubset <- trips_tidy %>%
+  filter(month == "september", weekday == "Monday", hour == "11", usertype == "Subscriber")
+
+mapsubset <- ridesubset %>%
+  mutate(id = seq.int(nrow(ridesubset))) %>%
+  select(id,
+         start_station_latitude, start_station_longitude, 
+         end_station_latitude, end_station_longitude) %>%
+  gather(key = group, value = location, -id) %>%
+  separate(group, c("group", "disc", "where")) %>%
+  select(-"disc") %>%
+  spread(where, location)
+```
+###### extra code, unused at this point ########
+test <- head(d1, 100) %>%
+  select(starttime, start_station_latitude, start_station_longitude, end_station_latitude, end_station_longitude) %>%
+  gather(key = group, value = location, -starttime) %>%
+  separate(group, c("group", "disc", "where")) %>%
+  select(-"disc") %>%
+  spread(where, location)
+
+test1 <- d1 %>%
+  group_by(start_station_latitude, 
+           start_station_longitude, 
+           end_station_latitude, 
+           end_station_longitude) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(n = as.numeric(n)) %>%
+  filter(n > 20) %>%
+  mutate(id = seq.int(nrow(test1))) %>%
+  gather(key = group, value = location, -id, -n) %>%
+  separate(group, c("group", "disc", "where")) %>%
+  select(-"disc") %>%
+  spread(where, location)
+
+
+d1_filter <- d1 %>%
+  separate(starttime, c("date", "time"), sep = " ") %>%
+  separate(stoptime, c("date", "time"), sep = " ")
+  
+
+Points to Line Function
+```{r points_to_line, message=FALSE, warning=FALSE}
+library(sp)
+library(maptools)
+
+points_to_line <- function(data, long, lat, id_field = NULL, sort_field = NULL) {
+
+  # Convert to SpatialPointsDataFrame
+  coordinates(data) <- c(long, lat)
+
+  # If there is a sort field...
+  if (!is.null(sort_field)) {
+    if (!is.null(id_field)) {
+      data <- data[order(data[[id_field]], data[[sort_field]]), ]
+    } else {
+      data <- data[order(data[[sort_field]]), ]
+    }
+  }
+
+  # If there is only one path...
+  if (is.null(id_field)) {
+
+    lines <- SpatialLines(list(Lines(list(Line(data)), "id")))
+
+    return(lines)
+
+    # Now, if we have multiple lines...
+  } else if (!is.null(id_field)) {  
+
+    # Split into a list by ID field
+    paths <- sp::split(data, data[[id_field]])
+
+    sp_lines <- SpatialLines(list(Lines(list(Line(paths[[1]])), "line1")))
+
+    # I like for loops, what can I say...
+    for (p in 2:length(paths)) {
+      id <- paste0("line", as.character(p))
+      l <- SpatialLines(list(Lines(list(Line(paths[[p]])), id)))
+      sp_lines <- spRbind(sp_lines, l)
+    }
+
+    return(sp_lines)
+  }
+}
+```
+
+
+y <- points_to_line(mapsubset, "longitude", "latitude", "id")
+
+stations %>%
+  leaflet() %>%
+  addProviderTiles("CartoDB") %>%
+  addPolylines(data = y, opacity = 0.1, weight = 3, color = "blue") %>%
+    addCircleMarkers(popup = stations$station, 
+                   radius = 1, 
+                   color = "black")
+                   
+Visualization 1: map of one bike's travels over the period of a year (here, may to december) 
+Use: advertising - maybe markup after to add like "August 8th - Joe and Sam went on a first date"?
+```{r mapOneBike}
+library(leaflet)
+library(shiny)
+
+popularbike <- trips_tidy %>%
+  group_by(bikeid) %>%
+  count() %>%
+  arrange(desc(n))
+ 
+ridesubset <- trips_tidy %>%
+  filter(bikeid == head(popularbike$bikeid, 1))
+
+mapsubset <- ridesubset %>%
+    mutate(id = seq.int(nrow(ridesubset))) %>%
+    select(id,month,
+         start_station_latitude, start_station_longitude, 
+         end_station_latitude, end_station_longitude) %>%
+  gather(key = group, value = location, -id, -month) %>%
+  separate(group, c("group", "disc", "where")) %>%
+  select(-"disc") %>%
+  spread(where, location)
+
+y <- points_to_line(mapsubset, "longitude", "latitude", "id")
+
+stations %>%
+  leaflet() %>%
+  addProviderTiles("CartoDB") %>%
+  addPolylines(data = y, opacity = 0.1, weight = 3, color = "blue") %>%
+    addCircleMarkers(popup = stations$station, 
+                   radius = 1, 
+                   color = "black")
+```
+ data = test, 
+               lng = ~longitude, 
+               lat = ~latitude, 
+               group = ~group,
+               stroke = TRUE,
+               opacity = .01,
+               color = ~pal(latitude))
+
+
+??points_to_line()
+
+
+ addPolylines(data = test1, 
+               lat = ~c(test1$start_station_latitude, test1$end_station_latitude), 
+               lng = ~c(test1$start_station_longitude, test1$end_station_longitude),
+               color = ~pal(n))
+
+ pal <- colorNumeric(
+  palette = "BuPu",
+  domain = NULL, 
+  na.color = NA)
+  
+ridesubset <- trips_tidy %>%
+  filter(month == input$month, 
+         weekday == input$weekday, 
+         hour == input$hour, 
+         usertype == "Subscriber")
+
+  mapsubset <- ridesubset %>%
+    mutate(id = seq.int(nrow(ridesubset))) %>%
+    select(id,
+         start_station_latitude, start_station_longitude, 
+         end_station_latitude, end_station_longitude) %>%
+  gather(key = group, value = location, -id) %>%
+  separate(group, c("group", "disc", "where")) %>%
+  select(-"disc") %>%
+  spread(where, location)
+
+y <- points_to_line(mapsubset, "longitude", "latitude", "id")
+
+stations %>%
+  leaflet() %>%
+  addProviderTiles("CartoDB") %>%
+  addPolylines(data = y, opacity = 0.1, weight = 3, color = "blue") %>%
+    addCircleMarkers(popup = stations$station, 
+                   radius = 1, 
+                   color = "black")
+
+```{r mapcolorbyStationStart}
+start_count <- trips_tidy %>%
+  group_by(start_station_latitude, start_station_longitude) %>%
+  count() %>%
+  ungroup()
+
+ pal <- colorNumeric(
+  palette = "inferno",
+  domain = NULL, 
+  na.color = NA)
+ 
+stations %>%
+  leaflet() %>%
+  addProviderTiles("CartoDB") %>%
+  addCircleMarkers(popup = ~paste0(stations$station, "</br>", "Trips Started: ", start_count$n, "</br>", "Number of Docks: ", stations$number_of_docks),
+                   radius = stations$number_of_docks/3,
+                   color = ~pal(start_count$n),
+                   fillOpacity = .6,
+                   weight = 5,
+                   fill = TRUE,
+                   stroke = FALSE) %>%
+  addLegend(title = "Rides Started", pal = pal, values = c(0:53846), position = "bottomright")
+```
+
+```{r mapcolorbyStationEnd}
+end_count <- trips_tidy %>%
+  group_by(end_station_latitude, end_station_longitude) %>%
+  count() %>%
+  ungroup()
+
+ pal <- colorNumeric(
+  palette = "inferno",
+  domain = NULL, 
+  na.color = NA)
+ 
+(stations %>%
+  leaflet() %>%
+  addProviderTiles("CartoDB") %>%
+  addCircleMarkers(popup = ~paste0(stations$station, "</br>", "Rides Completed: ", end_count$n, "</br>", "Number of Docks: ", stations$number_of_docks),
+                   radius = stations$number_of_docks/3,
+                   color = ~pal(start_count$n),
+                   fillOpacity = .6,
+                   weight = 5,
+                   fill = TRUE,
+                   stroke = FALSE) %>%
+  addLegend(title = "Rides Completed", pal = pal, values = c(0:50000), position = "bottomright"))
+```
+To do: set default map views, snap back to view, figure out how to make legend non-transparent?
+- search among stations?
+- size by number of bikes available?
+
+Visual #3: Histogram of bike rides in the month of September
+```{r histogram}
+trips_september <- trips_tidy %>%
+  filter(month == "september", tripduration < 3600) %>%
+  mutate(tripminutes = (tripduration/60))
+
+(plot <- trips_september %>%
+  ggplot(aes(x = tripminutes)) +
+  geom_density(fill = "black", color = "white",
+                   alpha = 0.7) +
+  geom_vline(xintercept = median(trips_september$tripminutes), 
+             color = "black", linetype = "dashed") +
+  annotate("text", 
+           label = paste("M =", round(median(trips_september$tripminutes), 2)), 
+           y = 0.07, x = 6, 
+           color = "black", size = 3) +
+  geom_density(data = filter(trips_september, weekday == "Saturday"), 
+               fill = "#335DFF", color = "white", alpha = 0.5) +
+  geom_vline(xintercept = median(filter(trips_september, weekday == "Saturday")$tripminutes),
+             color = "#335DFF", linetype = "dashed") +
+  annotate("text", 
+           label = paste("M =", round(median(filter(trips_september, 
+                                                    weekday == "Saturday")$tripminutes), 2)), 
+           y = 0.073, x = 6, 
+           color = "#335DFF", size = 3) +
+    labs(x = "Trip Duration in Minutes", y = "Density", 
+         title = "Average Ride Length in September by Weekday",
+         caption = "where M represents the median value of each distribution", size = 5) +
+    theme_minimal() +
+    annotate("text", label = c("September\n   Overall", "Saturday"),
+             y = c(0.045, 0.025), x = c(15, 22), 
+             hjust = 0, size = 3, color = c("black", "blue")))
+
+weekday_list <- as.list(unique(trips_september$weekday))
+```
+
+```{r}
+inputPanel(
+  selectInput("weekday", label = "Weekday",
+              choices = weekday_list,
+              selected = 1)
+)
+```
+
+```{r shinyPlot, echo = FALSE}
+renderPlot({
+  (plot <- trips_september %>%
+  ggplot(aes(x = tripminutes)) +
+  geom_density(fill = "black", color = "white",
+                   alpha = 0.7) +
+  geom_vline(xintercept = median(trips_september$tripminutes), 
+             color = "black", linetype = "dashed") +
+  annotate("text", 
+           label = paste("M =", round(median(trips_september$tripminutes), 2)), 
+           y = 0.073, x = 6, 
+           color = "black", size = 5) +
+  geom_density(data = filter(trips_september, weekday == input$weekday), 
+               fill = "#335DFF", color = "white", alpha = 0.5) +
+  geom_vline(xintercept = median(filter(trips_september, weekday == input$weekday)$tripminutes),
+             color = "#335DFF", linetype = "dashed") +
+  annotate("text", 
+           label = paste("M =", round(median(filter(trips_september, 
+                                                    weekday == input$weekday)$tripminutes), 2)), 
+           y = 0.076, x = 6, 
+           color = "#335DFF", size = 5) +
+    labs(x = "Trip Duration in Minutes", y = "Density", 
+         title = "September Average Ride Length by Weekday",
+         caption = "where M represents the median value of each distribution") +
+    theme_minimal(base_size = 15) +
+    annotate("text", label = c("September\n   Overall", paste(input$weekday)),
+             y = c(0.045, 0.025), x = c(15, 22), 
+             hjust = 0, size = 5, color = c("black", "blue")))
+}, width = 600, height = 600)
+```
+
+previous code:
+
+trips_season <- trips_tidy %>%
+  mutate(season = ifelse(month == "december" | month == "january" | month == "february", 
+                         yes = "winter", 
+                         no = ifelse(month == "march" | month == "april" | month == "may", 
+                                     yes = "spring", 
+                                     no = ifelse(month == "june" | month == "july" | month == "august",
+                                                 yes = "summer", 
+                                                 no = "fall")))) %>%
+  filter(tripduration < 3600)
+  
+
+Visual 2: wordcloud and accompanying bar chart for word frequency
+```{r wordcloud}
+library(rtweet)
+library(tidytext)
+library(ggwordcloud)
+#twitterdata <- search_tweets("boston bike OR boston bicycle OR bluebikes OR bluebikesboston OR #BBWinterChallenge OR ridebluebikes", n = 18000, include_rts = FALSE)
+#twitterdata2 <- search_tweets("bikeshare", n = 18000, include_rts = FALSE)
+
+#save(twitterdata2, file = "tweets.RData")
+
+tweets <- import("tweets.RData")
+
+tweets_tidy <- tweets %>%
+  select(screen_name, created_at, text, hashtags) %>%
+  unnest_tokens(word, text, token = "words")
+
+c_stop_words <- bind_rows(data_frame(word = c("t.co", "https", "i’m", "и", 
+                                              "10", "de", "bikeshare"), 
+                                          lexicon = c("custom", "custom", "custom", "custom", 
+                                                      "custom", "custom", "custom")), 
+                                          stop_words)
+tweets_tidy <- tweets_tidy %>%
+  anti_join(c_stop_words)
+
+tweets_count <- tweets_tidy %>%
+  count(word, sort = TRUE)
+
+tweets_count %>%
+  filter(n > 15) %>%
+  mutate(word = reorder(as.factor(word), n)) %>%
+  ggplot(aes(x = word, y = n)) +
+  geom_col(alpha = 0.7, fill = "#4286f4", color = "white") +
+  coord_flip() +
+  theme_light() +
+  theme(text = element_text(size = 20))
+
+tweets_tidy <- tweets_tidy %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE)
+
+tweets_positive <- tweets_tidy %>%
+  filter(sentiment == "positive") %>%
+  head(15) %>%
+  mutate(word = reorder(as.factor(word), n))
+
+tweets_negative <- tweets_tidy %>%
+  filter(sentiment == "negative") %>%
+  head(15) %>%
+  mutate(word = reorder(as.factor(word), n))
+
+ggplot(tweets_positive,aes(x = word, y = n)) +
+  geom_col(alpha = 0.7, fill = "#4286f4", color = "white") +
+  coord_flip() +
+  theme_light() +
+  theme(text = element_text(size = 20)) +
+  labs(x = NULL, y = NULL, title = "Top 15 Positively Valenced Words")
+
+ggplot(tweets_negative,aes(x = word, y = n)) +
+  geom_col(alpha = 0.7, fill = "#f44271", color = "white") +
+  coord_flip() +
+  theme_light() +
+  theme(text = element_text(size = 20)) +
+  labs(x = NULL, y = NULL, title = "Top 15 Negatively Valenced Words")
+
+set.seed(15)
+
+tweets_angled <- tweets_tidy %>%
+  group_by(sentiment) %>%
+  top_n(15) %>%
+  mutate(angle = 90 * sample(c(0, 1), n(), 
+                             replace = TRUE, 
+                             prob = c(50, 50)))
+
+(sentcloud <- ggplot(tweets_angled, aes(label = word, size = n, 
+                                        color = sentiment, angle = angle)) +
+  geom_text_wordcloud_area(rm_outside = TRUE) +
+  scale_size_area(max_size = 20) +
+  theme_minimal())
+```
+
