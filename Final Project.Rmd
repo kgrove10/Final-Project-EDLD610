@@ -6,6 +6,38 @@ output: html_document
 runtime: shiny
 ---
 
+## Peer review from Teresa
+
+It's an impressive work! You've gone above and beyond what was required. Your codes will certainly be my refereces if in the future I need to code with leaflet, shiny, tidytext and ggwordcloud. 
+
+### Strength
+
++ I like how you can use annotation effciently, where you calculate median and paste M in the same line of code. 
++ Although you had a total of 12 complicated datasets to start with, you managed to tidy all dataset with mastery of coding.
++ The biggist strength of your work is to go beyound what was taught in class and select a proper packages to display data visualization. I really admire your motivation in active learning.
+
+### Something I'll change if I were you
+
++ I am pretty sure this is a personal preference. For me, I like to create as less items as possible in my environment so I can easily access them and I won't get names mess up easily.
+
+### Things I learned
+
++ The packages you use essentially list out most things I've learned from your work! Really nice work, Kivalina!
+
+```{r installpackages, include=FALSE, eval=FALSE}
+
+install.packages("maptools")
+install.packages("leaflet")
+install.packages("shiny")
+install.packages("rtweet")
+install.packages("tidytext")
+install.packages("ggwordcloud")
+
+# From a prospective of reproducible document, I'd suggest include #install.packages() or at least list all the required packages up front. I actually got this feedback from one of my reviwer. It makes sense to my so I want to share the same thing with you :)
+
+```
+
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(rio)
@@ -73,17 +105,48 @@ d4 <- d4 %>%
 
 trips <- bind_rows(d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12)
 
+
+# -------- The code below can import multiple datasets. -----------------------------  
+
+d4to12 <- map_df(fs::dir_ls("data", regexp = "-tripdata\\.csv"), 
+                 import, setclass = "tbl_df",
+                 .id = "dataset") %>% 
+  clean_names()
+
+
+d1to3 <- map_df(fs::dir_ls("data", regexp = "_tripdata\\.csv"), 
+                import, setclass = "tbl_df",
+                .id = "dataset") %>% 
+  clean_names() %>% 
+  mutate(birth_year = as.integer(birth_year))
+
+d1tod12 <- bind_rows(d1to3, d4to12)  # This is equivalent to your trips datasest. 
+
+# "Month" is not included though...I don't know why...
+# I bet you could extract month info from "startdate" as a work-around method
+
+
+# I ran in a problem when I tried to import all datasets at once. My guess is not all datasets share the same variable types. "birth_year" is char in d1 to d3, and int in d4 to d12. I had to import datasets seperately. I'm guessing there might be a way to work around it? 
+
+# ----------- The code above can import multiple datasets. ----------------------------
+
 trips_tidy <- trips %>%
   separate(starttime, c("startdate", "starttime"), sep = " ") %>%
   separate(stoptime, c("stopdate", "stoptime"), sep = " ") %>%
-  mutate(startdate = ymd(startdate), stopdate = ymd(stopdate)) %>%
+  mutate(startdate = ymd(startdate), 
+         stopdate = ymd(stopdate),
+         weekday = weekdays(startdate)) %>%  
+  # It seems neater to me to have 1 `mutate` rather than doing multiple ` mutate` separatly, but I think it's just a personal preference.
+  
   #mutate(starttime = hms(starttime), stoptime = hms(stoptime)) %>%
-  mutate(weekday = weekdays(startdate)) %>%
   separate(starttime, c("hour", "minute", "second"))
 
 #filter by:
 ridesubset <- trips_tidy %>%
-  filter(month == "september", weekday == "Monday", hour == "11", usertype == "Subscriber")
+  filter(month == "september", 
+         weekday == "Monday", 
+         hour == "11", 
+         usertype == "Subscriber")
 
 mapsubset <- ridesubset %>%
   mutate(id = seq.int(nrow(ridesubset))) %>%
@@ -91,9 +154,11 @@ mapsubset <- ridesubset %>%
          start_station_latitude, start_station_longitude, 
          end_station_latitude, end_station_longitude) %>%
   gather(key = group, value = location, -id) %>%
-  separate(group, c("group", "disc", "where")) %>%
-  select(-"disc") %>%
+  separate(group, c("group", NA , "where")) %>%
+  # Noting really wrong here, I just combined two lines of code into one.
+  
   spread(where, location)
+
 ```
 ###### extra code, unused at this point ########
 test <- head(d1, 100) %>%
@@ -168,6 +233,9 @@ points_to_line <- function(data, long, lat, id_field = NULL, sort_field = NULL) 
     return(sp_lines)
   }
 }
+
+# The function code here is way beyond my current knowlege of R, so I can't give any feedback on it. I'll certainly use your code as a reference if I need a similar function!
+
 ```
 
 
@@ -186,23 +254,22 @@ Use: advertising - maybe markup after to add like "August 8th - Joe and Sam went
 ```{r mapOneBike}
 library(leaflet)
 library(shiny)
-
+  
+  
 popularbike <- trips_tidy %>%
-  group_by(bikeid) %>%
-  count() %>%
-  arrange(desc(n))
- 
+  count(bikeid, sort = TRUE) 
+  # count() calls group_by() before and ungroup() after and has a sorting function.
+
 ridesubset <- trips_tidy %>%
   filter(bikeid == head(popularbike$bikeid, 1))
 
 mapsubset <- ridesubset %>%
     mutate(id = seq.int(nrow(ridesubset))) %>%
     select(id,month,
-         start_station_latitude, start_station_longitude, 
-         end_station_latitude, end_station_longitude) %>%
+           start_station_latitude, start_station_longitude, 
+           end_station_latitude, end_station_longitude) %>%
   gather(key = group, value = location, -id, -month) %>%
-  separate(group, c("group", "disc", "where")) %>%
-  select(-"disc") %>%
+  separate(group, c("group", NA, "where")) %>%
   spread(where, location)
 
 y <- points_to_line(mapsubset, "longitude", "latitude", "id")
@@ -211,9 +278,13 @@ stations %>%
   leaflet() %>%
   addProviderTiles("CartoDB") %>%
   addPolylines(data = y, opacity = 0.1, weight = 3, color = "blue") %>%
-    addCircleMarkers(popup = stations$station, 
+  addCircleMarkers(popup = stations$station, 
                    radius = 1, 
                    color = "black")
+
+# leaflet is something I think about learning but never get enough motivation to do it.
+# After seeing this data visulization, I certainly will put leaflet to my to-explore list.
+# This plot is created to show a biker's travel for a period of time. It seems to me the data can only show the traveling displacement (straight line from beginning and end) but not traveling distance/route. Any title of subtitle could help understand the true menssages.
 ```
  data = test, 
                lng = ~longitude, 
@@ -265,9 +336,8 @@ stations %>%
 
 ```{r mapcolorbyStationStart}
 start_count <- trips_tidy %>%
-  group_by(start_station_latitude, start_station_longitude) %>%
-  count() %>%
-  ungroup()
+  count(start_station_latitude, start_station_longitude) 
+
 
  pal <- colorNumeric(
   palette = "inferno",
@@ -285,13 +355,13 @@ stations %>%
                    fill = TRUE,
                    stroke = FALSE) %>%
   addLegend(title = "Rides Started", pal = pal, values = c(0:53846), position = "bottomright")
+
+# I am guessing this data visulization is about how popluar the station is when renting the bikes? Any title or subtitle may help deliver the menssages. 
 ```
 
 ```{r mapcolorbyStationEnd}
 end_count <- trips_tidy %>%
-  group_by(end_station_latitude, end_station_longitude) %>%
-  count() %>%
-  ungroup()
+  count(end_station_latitude, end_station_longitude)
 
  pal <- colorNumeric(
   palette = "inferno",
@@ -309,6 +379,8 @@ end_count <- trips_tidy %>%
                    fill = TRUE,
                    stroke = FALSE) %>%
   addLegend(title = "Rides Completed", pal = pal, values = c(0:50000), position = "bottomright"))
+ 
+ # I am not familar with leaflet() so I am curious why you need ( and ) at the beginning and end? 
 ```
 To do: set default map views, snap back to view, figure out how to make legend non-transparent?
 - search among stations?
@@ -322,23 +394,30 @@ trips_september <- trips_tidy %>%
 
 (plot <- trips_september %>%
   ggplot(aes(x = tripminutes)) +
-  geom_density(fill = "black", color = "white",
-                   alpha = 0.7) +
+  geom_density(fill = "black", 
+               color = "white", 
+               alpha = 0.7) +
   geom_vline(xintercept = median(trips_september$tripminutes), 
-             color = "black", linetype = "dashed") +
+             color = "black", 
+             linetype = "dashed") +
   annotate("text", 
            label = paste("M =", round(median(trips_september$tripminutes), 2)), 
            y = 0.07, x = 6, 
-           color = "black", size = 3) +
+           color = "black", 
+           size = 3) +
   geom_density(data = filter(trips_september, weekday == "Saturday"), 
-               fill = "#335DFF", color = "white", alpha = 0.5) +
+               fill = "#335DFF", 
+               color = "white", 
+               alpha = 0.5) +
   geom_vline(xintercept = median(filter(trips_september, weekday == "Saturday")$tripminutes),
-             color = "#335DFF", linetype = "dashed") +
+             color = "#335DFF", 
+             linetype = "dashed") +
   annotate("text", 
            label = paste("M =", round(median(filter(trips_september, 
-                                                    weekday == "Saturday")$tripminutes), 2)), 
+                                                    weekday == "Saturday")$tripminutes), 2)),
            y = 0.073, x = 6, 
-           color = "#335DFF", size = 3) +
+           color = "#335DFF", 
+           size = 3) +
     labs(x = "Trip Duration in Minutes", y = "Density", 
          title = "Average Ride Length in September by Weekday",
          caption = "where M represents the median value of each distribution", size = 5) +
@@ -356,27 +435,34 @@ inputPanel(
               choices = weekday_list,
               selected = 1)
 )
+
+# The use of shiny package is again beyond my knowlege so apologize for not being able to comment anything. 
 ```
 
 ```{r shinyPlot, echo = FALSE}
 renderPlot({
   (plot <- trips_september %>%
   ggplot(aes(x = tripminutes)) +
-  geom_density(fill = "black", color = "white",
-                   alpha = 0.7) +
+  geom_density(fill = "black", 
+               color = "white",
+               alpha = 0.7) +
   geom_vline(xintercept = median(trips_september$tripminutes), 
-             color = "black", linetype = "dashed") +
+             color = "black", 
+             linetype = "dashed") +
   annotate("text", 
            label = paste("M =", round(median(trips_september$tripminutes), 2)), 
            y = 0.073, x = 6, 
            color = "black", size = 5) +
   geom_density(data = filter(trips_september, weekday == input$weekday), 
-               fill = "#335DFF", color = "white", alpha = 0.5) +
-  geom_vline(xintercept = median(filter(trips_september, weekday == input$weekday)$tripminutes),
+               fill = "#335DFF", 
+               color = "white", 
+               alpha = 0.5) +
+  geom_vline(xintercept = median(filter(trips_september, 
+                                        weekday == input$weekday)$tripminutes),
              color = "#335DFF", linetype = "dashed") +
   annotate("text", 
            label = paste("M =", round(median(filter(trips_september, 
-                                                    weekday == input$weekday)$tripminutes), 2)), 
+                                                    weekday == input$weekday)$tripminutes),2)), 
            y = 0.076, x = 6, 
            color = "#335DFF", size = 5) +
     labs(x = "Trip Duration in Minutes", y = "Density", 
@@ -438,6 +524,8 @@ tweets_count %>%
   theme_light() +
   theme(text = element_text(size = 20))
 
+# Is there any reason you create tweets_count separately? or is it ok to comebine two chunks of code into one?
+
 tweets_tidy <- tweets_tidy %>%
   inner_join(get_sentiments("bing")) %>%
   count(word, sentiment, sort = TRUE)
@@ -480,5 +568,7 @@ tweets_angled <- tweets_tidy %>%
   geom_text_wordcloud_area(rm_outside = TRUE) +
   scale_size_area(max_size = 20) +
   theme_minimal())
+
+# why do you need ( and ) at the beginning and end? maybe it's something with ggcloudwords?
 ```
 
